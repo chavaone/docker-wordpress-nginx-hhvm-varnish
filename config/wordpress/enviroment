@@ -1,0 +1,9 @@
+# file: .env
+wppath=/home/wordpress/site
+wpurl=aquelando.info
+dbhost=localhost
+dbname=wordpress
+dbuser=wordpress
+dbpass=secret
+wpuser=admin
+wppass=anothersecret

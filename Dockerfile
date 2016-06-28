@@ -1,59 +1,82 @@
-FROM      ubuntu:14.04
-MAINTAINER Matt Webb "mattrw89@gmail.com"
+FROM phusion/baseimage:0.9.18
+MAINTAINER Marcos Chavarría Teijeiro <chavarria1991@gmail.com>
+#Based on the work of Matt Webb "mattrw89@gmail.com"
 
+#Set Language
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 ENV LC_ALL en_US.UTF-8
 ENV DEBIAN_FRONTEND noninteractive
-
 RUN locale-gen $LANG; echo "LANG=\"${LANG}\"" > /etc/default/locale; dpkg-reconfigure locales
 
-RUN apt-get update;
-RUN apt-get install -y wget
-RUN apt-get install -y apt-transport-https
-RUN wget -O - https://repo.varnish-cache.org/ubuntu/GPG-key.txt | apt-key add -
-RUN echo deb https://repo.varnish-cache.org/ubuntu/ trusty varnish-4.0 >> /etc/apt/sources.list.d/varnish-cache.list
-RUN apt-get update
-RUN apt-get install -y varnish
-RUN apt-get install -y software-properties-common
+# Upgrade system
+RUN apt-get update  && \
+    apt-get upgrade -y
 
-RUN wget -O - http://dl.hhvm.com/conf/hhvm.gpg.key | apt-key add -
-RUN echo deb http://dl.hhvm.com/ubuntu trusty main | tee /etc/apt/sources.list.d/hhvm.list
-RUN echo deb http://archive.ubuntu.com/ubuntu trusty main universe | tee /etc/apt/sources.list
-RUN add-apt-repository -y ppa:nginx/stable
-RUN apt-get update
+# Install basic packages
+RUN apt-get install -y wget apt-transport-https software-properties-common curl unzip
 
-RUN \
-  apt-get install -y \
-  hhvm-fastcgi \
-  nginx \
-  mysql-client
+# Install Varnish
+RUN wget -O - https://repo.varnish-cache.org/ubuntu/GPG-key.txt | apt-key add -  && \
+    echo deb https://repo.varnish-cache.org/ubuntu/ trusty varnish-4.0 >> /etc/apt/sources.list.d/varnish-cache.list  && \
+    apt-get update && apt-get install -y varnish
 
-RUN adduser --disabled-login --gecos 'Wordpress' wordpress
+# Install HHVM
+RUN wget -O - http://dl.hhvm.com/conf/hhvm.gpg.key | apt-key add - && \
+    echo deb http://dl.hhvm.com/ubuntu trusty main | tee /etc/apt/sources.list.d/hhvm.list && \
+    apt-get update  && \
+    apt-get install -y hhvm
 
-VOLUME ['/home/wordpress']
+# Install NGINX
+RUN echo deb http://archive.ubuntu.com/ubuntu trusty main universe | tee /etc/apt/sources.list  && \
+    add-apt-repository -y ppa:nginx/stable  && \
+    apt-get update  && \
+    apt-get install -y nginx
 
-ADD wordpress/wp_version_writer.py /home/wordpress/scripts/wp_version_writer.py
-ADD wordpress/wp_version_checker.py /home/wordpress/scripts/wp_version_checker.py
+# Wordpress Requirements
+RUN apt-get update && \
+    apt-get -y install php5-curl php5-gd php5-intl php-pear php5-imagick php5-imap php5-mcrypt php5-memcache php5-ming php5-ps php5-pspell php5-recode php5-sqlite php5-tidy php5-xmlrpc php5-xsl
 
-RUN apt-get install -y python-dev
-RUN mkdir /home/wordpress/builtin_wordpress; mkdir /home/wordpress/live_wordpress;
-RUN cd /home/wordpress/builtin_wordpress; wget $(python ../scripts/wp_version_writer.py) -O latest.tar.gz; tar -xvzf latest.tar.gz; rm latest.tar.gz; mv wordpress/* .; rm -R wordpress
+# Upgrade to PHP 5.6
+RUN echo "deb http://ppa.launchpad.net/ondrej/php5-5.6/ubuntu trusty main" >> /etc/apt/sources.list && \
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-key E5267A6C  && \
+    apt-get update && \
+    apt-get -y install php5 php5-gd php5-ldap php5-sqlite php5-pgsql php-pear php5-mysql php5-mcrypt php5-xmlrpc php5-fpm
 
-EXPOSE 9999 443 80
+# Create user wordpress
+RUN adduser --system --home /home/wordpress --group --disabled-login --disabled-password wordpress
 
-ENV NFILES 131072
-ENV MEMLOCK 82000
+# Install WP-CLI
+RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar  && \
+    mv wp-cli.phar /usr/local/bin/wp && \
+    chmod +x /usr/local/bin/wp
 
-ADD nginx/nginx.conf /etc/nginx/nginx.conf
-ADD varnish/varnish4-wordpress /etc/varnish/default.vcl
-ADD start.sh /start.sh
-RUN chmod 755 /start.sh
-ADD wordpress/wp-config.php /home/wordpress/_config/wp-config.php
-ADD wordpress/production-config.php /home/wordpress/_config/production-config.php
-RUN chown wordpress:wordpress /home/wordpress/_config/*.php
-RUN chown wordpress:wordpress -R /home/wordpress/builtin_wordpress/*
+# Install HHVM Fast CGI
+RUN /usr/share/hhvm/install_fastcgi.sh
 
-RUN ls -la /home/wordpress/builtin_wordpress
+# Configure NGINX
+COPY config/nginx/nginx.conf /etc/nginx/nginx.conf
 
-CMD ["/start.sh"]
+# Configure varnish
+COPY config/varnish/varnish4-wordpress /etc/varnish/default.vcl
+
+# Copy entrypoint and wp config files
+COPY start.sh /home/wordpress/entrypoint.sh
+COPY config/wordpress/enviroment /home/wordpress/.env
+COPY config/wordpress/appsettings.yml /home/wordpress/appsettings.yml
+RUN chown wordpress:wordpress /home/wordpress/.env /home/wordpress/appsettings.yml /home/wordpress/entrypoint.sh && \
+    chmod +x /home/wordpress/entrypoint.sh
+
+# Create site and logs directories
+RUN mkdir /home/wordpress/site /home/wordpress/logs
+RUN chown wordpress:wordpress /home/wordpress/site /home/wordpress/logs
+VOLUME /home/wordpress/site
+VOLUME /home/wordpress/logs
+
+# Install wp-bootstrap wp-cli package
+USER wordpress
+RUN wp package install eriktorsner/wp-bootstrap
+
+EXPOSE 80
+
+ENTRYPOINT ["/home/wordpress/entrypoint.sh"]

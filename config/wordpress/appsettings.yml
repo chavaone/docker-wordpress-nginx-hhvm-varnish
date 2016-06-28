@@ -1,0 +1,9 @@
+# file: appsettings.yml
+title: Título
+keepDefaultContent: false
+
+plugins:
+  #standard -> plugins from wp repo
+  standard:
+      - wordpress-seo
+      - wp-hide-security-enhancer
